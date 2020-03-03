@@ -1,0 +1,29 @@
+---
+title: "School Project_Hu&Shang"
+output: pdf_document
+author: "Ann Hu & Kexin Shang"
+date: "`r format(Sys.Date(), '%d %b %Y')`"
+---
+
+```{r knitr-options, include = FALSE}
+knitr::opts_chunk$set(fig.align="center",
+                      warning = FALSE,
+                      message = FALSE,
+                      comment = NA)
+```
+
+### Load Packages
+
+```{r libs, message = F, warning = F}
+library(tidyverse)
+library(broom)
+library(xlsx)
+library(caret)
+library(GGally)
+theme_set(theme_bw()) #set ggplot as black and white
+```
+
+```{r}
+df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
+```
+
