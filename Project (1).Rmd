@@ -1,0 +1,159 @@
+---
+title: "School Project_Hu&Shang"
+#output: pdf_document
+output: github_document
+author: "Ann Hu & Kexin Shang"
+date: "`r format(Sys.Date(), '%d %b %Y')`"
+---
+
+```{r knitr-options, include = FALSE}
+knitr::opts_chunk$set(fig.align="center",
+                      warning = FALSE,
+                      message = FALSE,
+                      comment = NA)
+```
+
+### Load Packages
+
+```{r libs, message = F, warning = F}
+library(tidyverse)
+library(broom)
+library(xlsx)
+library(caret)
+theme_set(theme_bw()) #set ggplot as black and white
+```
+
+### Read School data and split into training and testing
+```{r}
+df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
+set.seed(298329)
+inTraining <- caret::createDataPartition(df$Rating, 
+                                         p = .75,
+                                         list = F)
+training <- df[inTraining, ]
+testing  <- df[-inTraining, ]
+```
+
+
+### Multilinear Regression
+```{r}
+lm_reg <-lm(Rating ~ ., data = training)
+summary(lm_reg)
+```
+
+### Multilinear Regression MSE
+```{r}
+test_preds <- predict(lm_reg, newdata = testing)
+test_df <- testing %>%
+  mutate(y_hat_lm = test_preds,
+         sq_err_lm = (y_hat_lm - Rating)^2)
+lm_MSE <- mean(test_df$sq_err_lm)
+lm_MSE
+```
+
+### Lasso Model
+```{r}
+df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
+x <- model.matrix(Rating ~ ., df)[, -1]
+y <- df$Rating
+
+inTraining <- createDataPartition(df$Rating, 
+                                  p = .75,
+                                  list = F)
+
+x_train <- x[inTraining, ]
+x_test  <- x[-inTraining, ]
+
+y_train <- y[inTraining]
+y_test <- y[-inTraining]
+```
+
+### Find best lambda using CV for lasso
+```{r}
+set.seed(298329)
+lambdas <- 10^seq(-2, 5, len = 100)
+lasso_mod <- glmnet(x_train, y_train, alpha = 1, lambda = lambdas)
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, lambda = lambdas)
+plot(lasso_cv)
+```
+
+### Find the MSE of Lasso Model and the coefficients of estimates
+```{r}
+lasso_MSE <- mean((predict(lasso_mod, s = lasso_cv$lambda.1se, newx = x_test) - y_test)^2)
+lasso_full <- glmnet(x,y,alpha = 1)
+coef_lasso <- coef(lasso_full,s = lasso_cv$lambda.1se)
+coef_lasso
+```
+
+### Regression Tree
+```{r}
+set.seed(298329)
+df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
+inTraining <- caret::createDataPartition(df$Rating, 
+                                         p = .75,
+                                         list = F)
+training <- df[inTraining, ]
+testing  <- df[-inTraining, ]
+train_control <- trainControl(method = "repeatedcv",
+                            number = 10, 
+                            repeats = 5)
+tune_grid <- data.frame(maxdepth = 1:10) #num of branches
+cv_school_tree <- train(Rating ~ ., 
+                        data = training,
+                        method = "rpart2", 
+                        trControl = train_control,
+                        tuneGrid = tune_grid)
+plot(cv_school_tree)
+```
+
+### MSE of Regression tree using braches = 4
+```{r}
+test_preds <- predict(cv_school_tree, newdata = testing)
+test_df <- test_df %>%
+  mutate(y_hat_regtree = test_preds,
+         sq_err_regtree = (y_hat_regtree - Rating)^2)
+regtree_MSE <- mean(test_df$sq_err_regtree)
+regtree_MSE
+```
+
+### Random Forest
+```{r}
+tune_grid <- expand.grid(mtry = 2:16,
+                        splitrule = "variance",
+                        min.node.size = 10)
+train_control <- trainControl(method = "cv", number = 10)
+rf_school_cv <- train(Rating ~ .,
+                    data = training,
+                    method = "ranger",
+                    num.trees = 500,
+                    importance = "impurity",
+                    trControl = train_control,
+                    tuneGrid = tune_grid)
+plot(rf_school_cv)
+```
+
+### MSE of Random Forest 
+```{r}
+test_preds <- predict(rf_school_cv, newdata = testing)
+test_df <- test_df %>%
+  mutate(y_hat_rf = test_preds,
+         sq_err_rf = (y_hat_rf - Rating)^2)
+rf_MSE <- mean(test_df$sq_err_rf)
+rf_MSE
+```
+
+### Important variables selected by random forest
+```{r}
+imp <- varImp(rf_school_cv)$importance
+rn <- row.names(imp)
+imp_df <- data_frame(variable = rn,
+                      importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+p + geom_col(fill = "#6e0000") +
+coord_flip()
+```
+
+
