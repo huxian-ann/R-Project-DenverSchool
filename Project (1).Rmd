@@ -20,6 +20,8 @@ library(tidyverse)
 library(broom)
 library(xlsx)
 library(caret)
+library(gbm)
+library(ranger)
 theme_set(theme_bw()) #set ggplot as black and white
 ```
 
