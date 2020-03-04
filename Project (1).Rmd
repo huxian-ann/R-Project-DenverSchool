@@ -22,13 +22,17 @@ library(xlsx)
 library(caret)
 library(glmnet)
 library(gbm)
+library(GGally)
 library(ranger)
+library(rpart)
 theme_set(theme_bw()) #set ggplot as black and white
 ```
 
 ### Read School data and split into training and testing
 ```{r}
 df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
+
+ggpairs(df)
 set.seed(298329)
 inTraining <- caret::createDataPartition(df$Rating, 
                                          p = .75,
@@ -82,9 +86,9 @@ plot(lasso_cv)
 
 ### Find the MSE of Lasso Model and the coefficients of estimates
 ```{r}
-lasso_MSE <- mean((predict(lasso_mod, s = lasso_cv$lambda.1se, newx = x_test) - y_test)^2)
+lasso_MSE <- mean((predict(lasso_mod, s = lasso_cv$lambda.min, newx = x_test) - y_test)^2)
 lasso_full <- glmnet(x,y,alpha = 1)
-coef_lasso <- coef(lasso_full,s = lasso_cv$lambda.1se)
+coef_lasso <- coef(lasso_full,s = lasso_cv$lambda.min)
 coef_lasso
 ```
 
@@ -109,7 +113,7 @@ cv_school_tree <- train(Rating ~ .,
 plot(cv_school_tree)
 ```
 
-### MSE of Regression tree using braches = 4
+### MSE of Regression tree using branches = 4
 ```{r}
 test_preds <- predict(cv_school_tree, newdata = testing)
 test_df <- test_df %>%
