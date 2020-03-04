@@ -20,6 +20,7 @@ library(tidyverse)
 library(broom)
 library(xlsx)
 library(caret)
+library(glmnet)
 library(gbm)
 library(ranger)
 theme_set(theme_bw()) #set ggplot as black and white
@@ -120,7 +121,8 @@ regtree_MSE
 
 ### Random Forest
 ```{r}
-tune_grid <- expand.grid(mtry = 2:16,
+set.seed(298329)
+tune_grid <- expand.grid(mtry = 2:21,
                         splitrule = "variance",
                         min.node.size = 10)
 train_control <- trainControl(method = "cv", number = 10)
@@ -158,4 +160,51 @@ p + geom_col(fill = "#6e0000") +
 coord_flip()
 ```
 
+### Gradient Boosting
+
+```{r}
+set.seed(298329)
+grid <- expand.grid(interaction.depth = c(1, 3, 5), #how many branches in the tree
+                    n.trees = seq(100, 2000, by = 100),
+                    shrinkage = c(.01, 0.001),
+                    n.minobsinnode = 10)
+
+trainControl <- trainControl(method = "cv", number = 5)
+
+gbm_school <- train(Rating ~ ., 
+                    data = training, 
+                    distribution = "gaussian", 
+                    method = "gbm",
+                    trControl = trainControl, 
+                    tuneGrid = grid,
+                    verbose = FALSE)
+plot(gbm_school)
+```
+
+
+### MSE of Gradient Boosting
+```{r}
+test_preds <- predict(gbm_school, newdata = testing)
+test_df <- test_df %>%
+  mutate(y_hat_gbm = test_preds,
+         sq_err_gbm = (y_hat_gbm - Rating)^2)
+gbm_MSE <- mean(test_df$sq_err_gbm)
+gbm_MSE
+```
+
+### Important variables selected by Gradient Boosting
+```{r}
+imp <- varImp(gbm_school)$importance
+rn <- row.names(imp)
+imp_df <- data_frame(variable = rn, 
+                     importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+p + geom_col(fill = "#6e0000") +
+  coord_flip()
+```
+
+### Nerual Network
 
