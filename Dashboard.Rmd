@@ -1,21 +1,15 @@
 ---
 title: "R Project: Denver Public School Rating"
-#output: pdf_document
-output: github_document
 author: "Ann Hu & Kexin Shang"
-date: "`r format(Sys.Date(), '%d %b %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    storyboard: true
+    orientation: columns
+    #vertical_layout: fill
+    vertical_layout: scroll
 ---
 
-```{r knitr-options, include = FALSE}
-knitr::opts_chunk$set(fig.align="center",
-                      warning = FALSE,
-                      message = FALSE,
-                      comment = NA)
-```
-
-### Load Packages
-
-```{r libs, message = F, warning = F}
+```{r setup, include=FALSE}
 library(tidyverse)
 library(broom)
 library(xlsx)
@@ -30,29 +24,67 @@ library(nnet)
 library(keras)
 library(MASS)
 theme_set(theme_bw()) #set ggplot as black and white
+library(flexdashboard)
+library(leaflet)
 ```
 
-### Read School data and have an overview of the data
+
+Map
+=============================================================================================================================
+
+### Our project analyzed ratings of 119 public schools in the Denver city.  
+
+***
+
+This map shows the Denver public schools contained in our data set. 
+
+- Marker color indicate school's rating range:  
+  Green - High  
+  Orange - Medium  
+  Red - Low  
+
+- Hover over a marker to see the school name and rating. 
+
+
 ```{r}
+library(leaflet)
+library(htmltools)
+
+# read in the geo info of schcools
+dfMap <- read.xlsx("School.xlsx", sheetName = "Map")
+
+# customize marker color based on school rating
+getColor <- function(dfMap) {
+  sapply(dfMap$Rating, function(Rating) {
+  if(Rating <= 30) {
+    "red"
+  } else if(Rating <= 50) {
+    "orange"
+  } else {
+    "green"
+  } })
+}
+
+icons <- awesomeIcons(
+  iconColor = "white",
+  markerColor = getColor(dfMap)
+)
+
+# build map
+leaflet(dfMap) %>%
+  addTiles() %>%
+  addAwesomeMarkers(~Long, ~Lat, icon = icons, label = ~htmlEscape(Name_Rating))
+```
+
+ 
+
+Model Details 
+=========================================================================================================
+
+### A regression analysis of multiple models was conducted to estimate the rating of the schools and identify the significant predictors impating the ratings.
+
+```{r, include=FALSE}
 df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
-p1 <- ggpairs(df)
-# p1 <- ggpairs(df, upper = list(continuous = wrap("density", alpha = 0.5), combo = "box"),
-#  lower = list(continuous = wrap("points", alpha = 0.3,    size=0.1), 
-#               combo = wrap("dot", alpha = 0.4,            size=0.2)))
-# p2 <- ggpairs(df, upper = list(continuous = wrap("points", alpha = 0.3,    size=0.1), 
-#               combo = wrap("dot", alpha = 0.4,            size=0.2)),
-#  lower = list(continuous = wrap("points", alpha = 0.3,    size=0.1), 
-#               combo = wrap("dot", alpha = 0.4,            size=0.2)))
-# #print(p1 + theme(strip.placement = "outside", text = element_text(size = 10)))
-# #print(p1 + theme(strip.placement = "outside", text = element_text(size = new_size)))
-# 
-# p_cor <- set_panel_size(p2,
-#                           width  = unit(10, "cm"),
-#                           height = unit(4, "in"))
-```
-
-### Split data into training and testing
-```{r}
 set.seed(2020)
 inTraining <- caret::createDataPartition(df$Rating, 
                                          p = .8,
@@ -61,52 +93,30 @@ training <- df[inTraining, ]
 testing  <- df[-inTraining, ]
 ```
 
-
 ### Multilinear Regression
 ```{r}
 lm_reg <- lm(Rating ~ ., data = training)
-summary(lm_reg)
-```
-
-### Multilinear Regression test MSE
-```{r}
 test_preds <- predict(lm_reg, newdata = testing)
 test_df <- testing %>%
   mutate(y_hat_lm = test_preds,
          sq_err_lm = (y_hat_lm - Rating)^2)
 lm_MSE <- mean(test_df$sq_err_lm)
-lm_MSE
+summary(lm_reg)
 ```
 
 ### Lasso Model
 ```{r}
-#df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
 x <- model.matrix(Rating ~ ., df)[, -1]
 y <- df$Rating
-
-#inTraining <- createDataPartition(df$Rating, 
-#                                  p = .75,
-#                                  list = F)
-
 x_train <- x[inTraining, ]
 x_test  <- x[-inTraining, ]
-
 y_train <- y[inTraining]
 y_test <- y[-inTraining]
-```
 
-### Find best lambda using CV for lasso
-```{r}
 set.seed(2020)
 lambdas <- 10^seq(-2, 5, len = 100)
 lasso_mod <- glmnet(x_train, y_train, alpha = 1, lambda = lambdas)
 lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, lambda = lambdas)
-plot(lasso_cv)
-```
-
-### Find the test MSE and the predictor coefficients of Lasso Model 
-```{r}
-#lasso_MSE <- mean((predict(lasso_mod, s = lasso_cv$lambda.min, newx = x_test) - y_test)^2)
 test_preds <- predict(lasso_mod, s = lasso_cv$lambda.min, newx = x_test)
 test_df <- test_df %>%
   mutate(y_hat_lasso = test_preds,
@@ -120,12 +130,6 @@ coef_lasso
 ### Regression Tree
 ```{r}
 set.seed(2020)
-#df <- read.xlsx("School.xlsx", sheetName = "Summary-nonzero")
-#inTraining <- caret::createDataPartition(df$Rating, 
-#                                         p = .75,
-#                                         list = F)
-#training <- df[inTraining, ]
-#testing  <- df[-inTraining, ]
 train_control <- trainControl(method = "repeatedcv",
                             number = 10, 
                             repeats = 5)
@@ -135,17 +139,12 @@ regTree <- train(Rating ~ .,
                         method = "rpart2", 
                         trControl = train_control,
                         tuneGrid = tune_grid)
-plot(regTree)
-```
-
-### Test MSE of Regression tree using branches = 4
-```{r}
 test_preds <- predict(regTree, newdata = testing)
 test_df <- test_df %>%
   mutate(y_hat_regTree = test_preds,
          sq_err_regTree = (test_preds - Rating)^2)
 regTree_MSE <- mean(test_df$sq_err_regTree)
-regTree_MSE
+plot(regTree)
 ```
 
 ### Random Forest
@@ -162,31 +161,12 @@ rf <- train(Rating ~ .,
                     importance = "impurity",
                     trControl = train_control,
                     tuneGrid = tune_grid)
-plot(rf)
-```
-
-### Test MSE of Random Forest 
-```{r}
 test_preds <- predict(rf, newdata = testing)
 test_df <- test_df %>%
   mutate(y_hat_rf = test_preds,
          sq_err_rf = (test_preds - Rating)^2)
 rf_MSE <- mean(test_df$sq_err_rf)
-rf_MSE
-```
-
-### Important variables selected by random forest
-```{r}
-imp <- varImp(rf)$importance
-rn <- row.names(imp)
-imp_df <- data_frame(variable = rn,
-                      importance = imp$Overall) %>%
-  arrange(desc(-importance)) %>%
-  mutate(variable = factor(variable, variable))
-p <- ggplot(data = imp_df,
-            aes(variable, importance))
-p + geom_col(fill = "#6e0000") +
-coord_flip()
+plot(rf)
 ```
 
 ### Gradient Boosting
@@ -207,36 +187,18 @@ gbm <- train(Rating ~ .,
                     trControl = trainControl, 
                     tuneGrid = grid,
                     verbose = FALSE)
-plot(gbm)
-```
-
-
-### Test MSE of Gradient Boosting
-```{r}
 test_preds <- predict(gbm, newdata = testing)
 test_df <- test_df %>%
   mutate(y_hat_gbm = test_preds,
          sq_err_gbm = (test_preds - Rating)^2)
 gbm_MSE <- mean(test_df$sq_err_gbm)
-gbm_MSE
+plot(gbm)
 ```
 
-### Important variables selected by Gradient Boosting
-```{r}
-imp <- varImp(gbm)$importance
-rn <- row.names(imp)
-imp_df <- data_frame(variable = rn, 
-                     importance = imp$Overall) %>%
-  arrange(desc(-importance)) %>%
-  mutate(variable = factor(variable, variable))
-p <- ggplot(data = imp_df,
-            aes(variable, importance))
-p + geom_col(fill = "#6e0000") +
-  coord_flip()
-```
 
 ### Nerual Network
-```{r, cache = T}
+
+```{r}
 set.seed(2020)
 tune_grid <- expand.grid(size = 1:8,
                          decay = 10^seq(-4, -2, len=6))
@@ -253,11 +215,7 @@ nn_train<- train(Rating ~ .,
                          linout = TRUE,
                          verbose = FALSE,
                          trace = FALSE)
-```
-```{r}
-nn_train
-```
-```{r}
+
 nn <- nnet(Rating ~ .,
                      data = training,
                      size =7,
@@ -265,19 +223,18 @@ nn <- nnet(Rating ~ .,
                      linout = TRUE,
                      maxit = 500,
                      trace = FALSE)
-```
 
-### Test MSE of Netural Nets
-```{r}
 test_preds <- predict(nn, newdata = testing)
 test_df <- test_df %>%
   mutate(y_hat_nn = test_preds,
          sq_err_nn = (test_preds - Rating)^2)
 nn_MSE <- mean(test_df$sq_err_nn)
-nn_MSE
+
+print("The final values used for the model were size = 7 and decay = 0.003981072")
 ```
 
 ### Deep Learning
+
 ```{r}
 x_train <- df[inTraining, ] %>%
   dplyr::select(-Rating)
@@ -289,37 +246,7 @@ y_train <- df[inTraining, ] %>%
 y_test <- df[-inTraining, ] %>%
   dplyr::select(Rating) %>%
   .[[1]]
-#avg <- apply(x_train, 2, mean)
-#std_dev <- apply(x_train, 2, sd)
-#x_train <- scale(x_train, center = avg, scale = std_dev)
-#x_test <- scale(x_test, center = avg, scale = std_dev)
-```
 
-```{r}
-network <- keras_model_sequential() %>%
-  layer_dense(units = 64,
-              activation = "relu",
-              input_shape = dim(x_train)[[2]]) %>%
-  layer_dense(units = 32, activation = "relu") %>%
-  layer_dense(units = 1)
-
-network %>%
-  compile(optimizer = "rmsprop",
-          loss = "mse",
-          metrics = c("mae"))
-```
-
-```{r}
-network %>%
-  fit(data.matrix(x_train), 
-      y_train, 
-      epochs = 50, 
-      batch_size=10, 
-      verbose = 1)
-```
-
-### Find the best number of epochs through cv
-```{r}
 build_network <- function(){
   network <- keras_model_sequential() %>%
     layer_dense(units = 64,
@@ -334,9 +261,7 @@ build_network <- function(){
   metrics = c("mae")
   )
 }
-```
 
-```{r, cache = T}
 set.seed(2020)
 k <- 10
 indices <- sample(1:y_train, replace = F)
@@ -347,7 +272,7 @@ accuracy_histories <- matrix(NA, nc = num_epochs, nr = k)
 
 for(i in 1:k){
   # i <- 1
-  cat(sprintf('\nProcessing Fold: %s at %s\n', i, Sys.time()))
+  # cat(sprintf('\nProcessing Fold: %s at %s\n', i, Sys.time()))
   val_index <- which(folds == i, arr.ind = TRUE)
   x_val <- data.matrix(x_train[val_index, ])
   y_val <- y_train[val_index]
@@ -362,10 +287,8 @@ for(i in 1:k){
                            validation_data = list(x_val, y_val)) 
   # results <- history$metrics$val_loss
   accuracy_histories[i, ] <- history$metrics$val_loss
-} 
-```
-```{r}
-avg_accuracy <- tibble(epoch = 1:num_epochs,
+}
+  avg_accuracy <- tibble(epoch = 1:num_epochs,
                        mse = apply(accuracy_histories, 2, mean))
 p <- ggplot(data = avg_accuracy,
             aes(x = epoch, y = mse))
@@ -374,33 +297,32 @@ p + geom_point() +
   ylim(0, 50) +
   geom_smooth() +
   theme_bw()
-bestEpoch <- avg_accuracy[avg_accuracy$mse == min(avg_accuracy$mse),"epoch"]
-bestEpoch
-```
 
+bestEpoch <- avg_accuracy[avg_accuracy$mse == min(avg_accuracy$mse),"epoch"]
+print(paste("Best number of epoch:", bestEpoch))
+```
 ```{r}
 network <- build_network()
 
 network %>% fit(data.matrix(x_train), 
                 y_train, 
-                epochs = 97, 
+                epochs = 80, 
                 batch_size = 20,
-                verbose = 1,
+                verbose = 0,
                 validation_data = list(data.matrix(x_test), y_test))
-```
-### Test MSE of deep network
-```{r}
 test_preds <- network %>%
   predict(data.matrix(x_test))
 test_df <- test_df %>%
   mutate(y_hat_deep = test_preds,
          sq_err_deep = (test_preds - Rating)^2)
 deep_MSE <- mean(test_df$sq_err_deep)
-deep_MSE
 ```
 
+Model Comparison
+============================================================================================================
 
-# Compare all the models
+### Predicted Rating of all models
+
 ```{r}
 p_yhat <- dplyr::select(test_df, Rating, y_hat_lm, y_hat_lasso, y_hat_regTree, 
                    y_hat_rf, y_hat_gbm, y_hat_nn, y_hat_deep) %>%
@@ -410,6 +332,9 @@ p_yhat + geom_density(alpha = .2) +
   facet_wrap(~ method) +
   scale_fill_brewer(palette = "Dark2")
 ```
+
+### Square error of all models
+
 ```{r}
 p_sqerr <- dplyr::select(test_df, Rating, sq_err_lm, sq_err_lasso, sq_err_regTree, 
                    sq_err_rf, sq_err_gbm, sq_err_nn, sq_err_deep) %>%
@@ -421,6 +346,8 @@ p_sqerr + geom_density(alpha = .2) +
                     labels = c("Rating", "lm", "lasso" , "tree", "rf", "gbm", "nn", "deep")) 
 
 ```
+
+### Test MSE of all models
 ```{r}
 dfsqerr <- data.frame(p_sqerr$data)
 TestMSE <- dfsqerr %>% 
@@ -429,3 +356,38 @@ TestMSE <- dfsqerr %>%
                    err_std = sd(sq_err))
 TestMSE
 ```
+
+
+Predictor Importance
+=============================================================================================================================
+
+### Predictor Importance by random forest
+```{r}
+imp <- varImp(rf)$importance
+rn <- row.names(imp)
+imp_df <- data_frame(variable = rn,
+                      importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+p + geom_col(fill = "#6e0000") +
+coord_flip()
+```
+
+### Predictor Importance by Gradient Boosting
+```{r}
+imp <- varImp(gbm)$importance
+rn <- row.names(imp)
+imp_df <- data_frame(variable = rn, 
+                     importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+p + geom_col(fill = "#6e0000") +
+  coord_flip()
+```
+
+Conclusion & Recommendation
+==============================================================================================================================
